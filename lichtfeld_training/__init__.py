@@ -390,7 +390,7 @@ class LichtFeldSettings(bpy.types.PropertyGroup):
     rig_mesh_orientation: EnumProperty(name="Look", items=[("INWARD", "Inward", "Look opposite the outward face normals"), ("OUTWARD", "Outward", "Look along the face normals"), ("TARGET", "Look at target", "Use the aim target controls")])
     rig_mesh_offset: FloatProperty(name="Surface offset", default=.05, min=-100000, max=100000, subtype="DISTANCE", unit="LENGTH")
     seed_method: EnumProperty(name="Initial points", items=[("VISIBLE", "From rendered views", "Visible surfaces colored from the captured images; reuses the same render"), ("SURFACE", "Surface geometry", "Sample scene geometry with base material colors; no geometry render passes")], default="VISIBLE")
-    seed_points: IntProperty(name="Initial point budget", default=training_options.PROFILES['mrnf']['init_num_pts'], min=1000, max=250000)
+    seed_points: IntProperty(name="Initial point budget", default=training_options.PROFILES['mrnf']['init_num_pts'], min=1000, max=10_000_000, soft_max=4_000_000)
     rig_orientation: EnumProperty(name="Orientation", items=[
         ("TARGET", "Look at target", "Aim at the explicit target or source center"),
         ("TANGENT", "Follow path", "Aim along the sampled path"),

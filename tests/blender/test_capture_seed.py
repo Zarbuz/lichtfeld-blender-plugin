@@ -82,6 +82,33 @@ class VisibleSeedContracts(unittest.TestCase):
             with self.assertRaises(ValueError):seed.load_view(root,0,256)
         self.assertLessEqual(seed.view_budget(30000,1000)*1000,4*30000+256000)
 
+    def test_large_captures_accept_budgets_beyond_250k(self):
+        self.assertEqual(seed.view_budget(2_000_000,6104),1311)
+        self.assertEqual(seed.view_budget(seed.MAX_SEED_POINTS,10000),4000)
+        with self.assertRaises(ValueError):seed.view_budget(seed.MAX_SEED_POINTS+1,100)
+        self.assertEqual(seed.anchor_budget(250_000,6104),40)
+        self.assertEqual(seed.anchor_budget(2_000_000,6104),seed.ANCHORS_PER_VIEW)
+        self.assertEqual(seed.minimum_depth_budget(6104),6104*seed.ANCHORS_PER_VIEW)
+    def test_every_view_keeps_its_own_anchors_under_a_global_budget(self):
+        # Many close-up views of tiny regions next to one wide view: stratified sampling alone
+        # starves the close-ups (the DepthCoverageError seen on large interior captures).
+        rng=np.random.default_rng(3);views=[]
+        for index in range(150):
+            corner=np.array([index*.3,0,0],np.float32)
+            views.append(((corner+rng.random((400,3))*.02).astype(np.float32),np.full((400,3),index,np.uint8)))
+        wide=(rng.random((200000,3))*[60,40,15]).astype(np.float32)
+        views.append((wide,np.zeros((len(wide),3),np.uint8)))
+        limit=150*seed.ANCHORS_PER_VIEW+20000
+        def own(points,index):
+            mine=views[index][0]
+            return int(np.isin(points.view('V12').ravel(),mine.view('V12').ravel()).sum())
+        starved,_=seed.merge(views,limit)
+        self.assertLess(min(own(starved,i) for i in range(150)),256)
+        points,colors=seed.merge(views,limit,seed.ANCHORS_PER_VIEW)
+        self.assertEqual(len(points),limit)
+        self.assertGreaterEqual(min(own(points,i) for i in range(150)),seed.ANCHORS_PER_VIEW)
+        again,_=seed.merge(views,limit,seed.ANCHORS_PER_VIEW)
+        np.testing.assert_array_equal(points,again)
     def test_mesh_normals_use_inverse_transpose_and_original_coordinates(self):
         centers=np.array([[1,0,0],[-1,0,0],[0,1,0],[0,0,1]],float)
         normals=centers.copy();normals[0]=[1,1,0]

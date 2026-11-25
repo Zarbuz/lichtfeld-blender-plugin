@@ -235,8 +235,13 @@ def render_dataset(job_path, reuse_images=False):
     if len(cameras) != len(job["cameras"]):
         raise ValueError("A capture camera is missing")
     if visible_seed:
-        from capture_seed import view_budget
+        from capture_seed import view_budget, minimum_depth_budget
         view_budget(job['seed_points'], len(cameras))  # Validate before any render.
+        if depth_supervision and job['seed_points'] < minimum_depth_budget(len(cameras)):
+            # Fail in seconds rather than after hours of rendering: every view needs its own depth anchors.
+            raise ValueError(f"Depth supervision with {len(cameras):,} views needs an initial point budget of at least "
+                             f"{minimum_depth_budget(len(cameras)):,} (currently {job['seed_points']:,}). "
+                             "Raise 'Initial point budget' or disable depth supervision.")
     # Freeze every camera independently, including whole-scene captures and
     # cameras sharing animated data. Constraints are resolved before isolation.
     bpy.context.view_layer.update()

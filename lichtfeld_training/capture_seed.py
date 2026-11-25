@@ -13,11 +13,31 @@ else:
     from capture_settings import validate_view_count
 
 
+# Global initial point budget. Large captures (thousands of interior views) need far more than the
+# historical 250 000 points: depth supervision requires 256 visible anchors in every single view.
+MAX_SEED_POINTS = 10_000_000
+# Own samples each view keeps in the merged cloud, so depth anchoring (256 required) cannot starve
+# a view that sees only a small part of the scene (close walls, corridors, stairs).
+ANCHORS_PER_VIEW = 320
+
+
 def view_budget(limit, views):
     validate_view_count(views)
-    if type(limit) is not int or not 4 <= limit <= 250000:
+    if type(limit) is not int or not 4 <= limit <= MAX_SEED_POINTS:
         raise ValueError("Invalid initialization budget or capture view count")
     return max(256, min(4096, math.ceil(4 * limit / views)))
+
+
+def anchor_budget(limit, views):
+    """Own samples reserved per view inside the global budget (never more than an even share)."""
+    validate_view_count(views)
+    return min(ANCHORS_PER_VIEW, limit // views)
+
+
+def minimum_depth_budget(views):
+    """Smallest global budget that lets every view keep enough depth anchors."""
+    validate_view_count(views)
+    return ANCHORS_PER_VIEW * views
 
 
 def instance_sample_plan(limit, instances):
@@ -143,7 +163,10 @@ def load_view(output, index, limit):
         raise ValueError(f"Visible-point samples for view {index + 1} are missing or incomplete. Existing rendered images are preserved.") from error
 
 
-def merge(views, limit):
+def merge(views, limit, reserve=0):
+    """Deduplicate all view samples, then keep at most `limit` points. With `reserve`, each view first keeps
+    up to `reserve` of its own samples (evenly spread over its image); spatial stratification fills the rest."""
+    sizes = [len(value[0]) for value in views]
     points = np.concatenate([value[0] for value in views])
     colors = np.concatenate([value[1] for value in views])
     if len(points) < 4:
@@ -152,6 +175,7 @@ def merge(views, limit):
     tolerance = max(float((high - low).max()) * 1e-6, 1e-7)
     keys = np.rint((points.astype(np.float64) - low) / tolerance).astype(np.int64)
     _, inverse, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
+    inverse = inverse.reshape(-1)
     # Average repeated surface/color observations before choosing spatial coverage.
     points = np.column_stack([np.bincount(inverse, weights=points[:, i]) / counts for i in range(3)]).astype(np.float32)
     colors = np.rint(np.column_stack([np.bincount(inverse, weights=colors[:, i]) / counts for i in range(3)])).astype(np.uint8)
@@ -159,9 +183,33 @@ def merge(views, limit):
         raise ValueError("Fewer than four distinct visible points. Check capture coverage.")
     if len(points) > limit:
         from lichtfeld_sessions.capture import spatial_indices
-        chosen = spatial_indices(points, limit)
+        reserved = reserved_indices(sizes, inverse, reserve, limit)
+        if len(reserved):
+            rest = np.setdiff1d(np.arange(len(points)), reserved, assume_unique=True)
+            fill = rest[spatial_indices(points[rest], limit - len(reserved))] if limit > len(reserved) else rest[:0]
+            chosen = np.sort(np.concatenate((reserved, fill)))
+        else:
+            chosen = spatial_indices(points, limit)
         points, colors = points[chosen], colors[chosen]
     return points, colors
+
+
+def reserved_indices(sizes, inverse, reserve, limit):
+    """Merged-point indices of the samples each view keeps for itself (deterministic, bounded by `limit`)."""
+    if reserve < 1:
+        return np.zeros(0, np.int64)
+    picks, offset = [], 0
+    for size in sizes:
+        if size:
+            take = np.linspace(0, size - 1, min(size, reserve), dtype=np.int64)
+            picks.append(inverse[offset + take])
+        offset += size
+    if not picks:
+        return np.zeros(0, np.int64)
+    reserved = np.unique(np.concatenate(picks)).astype(np.int64)
+    if len(reserved) > limit:
+        reserved = reserved[np.linspace(0, len(reserved) - 1, limit, dtype=np.int64)]
+    return reserved
 
 
 def write_ply(path, points, colors):
@@ -182,8 +230,9 @@ def write_ply(path, points, colors):
 
 def finalize(output, limit, count, return_cloud=False):
     budget = view_budget(limit, count)
-    points, colors = merge([load_view(output, index, budget) for index in range(count)], limit)
+    reserve = anchor_budget(limit, count)
+    points, colors = merge([load_view(output, index, budget) for index in range(count)], limit, reserve)
     write_ply(Path(output) / 'pointcloud.ply', points, colors)
     info = {'method': 'visible_rendered', 'points': len(points), 'budget': limit,
-            'color_space': 'encoded dataset RGB', 'samples_per_view': budget}
+            'color_space': 'encoded dataset RGB', 'samples_per_view': budget, 'reserved_per_view': reserve}
     return (info, points, colors) if return_cloud else info

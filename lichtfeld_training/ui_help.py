@@ -42,7 +42,7 @@ PROPERTIES = {
     'rig_mesh_orientation': 'Point cameras inward, outward along helper normals, or toward the chosen aiming target',
     'rig_mesh_offset': 'Offset camera positions along the helper’s world-space face normals, in scene units',
     'seed_method': 'Initialize Gaussians from rendered visible surfaces and image colors, or from sampled surface geometry',
-    'seed_points': 'Maximum initial point count shared across all captured views; positive depth supervision needs enough visible correspondences',
+    'seed_points': 'Maximum initial point count shared across all captured views (up to 10 million). Each view keeps up to 320 of its own points; depth supervision needs at least 320 per view, so budget 320 x the number of views or more',
     'rig_orientation': 'Choose target aiming, the curve tangent, or several perspective viewing directions at each sampled curve position',
     'rig_generator': 'Show parameters for creating or updating generated cameras; existing cameras are used until Apply is pressed',
     'rig_details': 'Show elevation, rotation, lens and aim offset. Applying replaces generated poses and preserves additional cameras; Undo restores the previous rig',
